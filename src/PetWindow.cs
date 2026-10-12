@@ -4,7 +4,7 @@ namespace PetDesktop;
 
 /// <summary>
 /// The pet on the taskbar: one transparent window, redrawn only when the frame changes.
-/// Standing — a blink every few seconds; walking — 7 frames a second; asleep — no timers at all (a mouse over it wakes it);
+/// Standing — a blink every few seconds; walking — 7 frames a second; asleep — no timers at all (a mouse over it wakes it, unless it sleeps on the site: then it purrs);
 /// a full-screen game or film — hidden, with only a check every 7 seconds.
 /// </summary>
 sealed class PetWindow
@@ -328,6 +328,8 @@ sealed class PetWindow
         }
         if (_state is State.Held or State.Fall or State.Jump or State.Hidden) return;
         _rub += d;
+        // asleep on the site: it purrs in its sleep (strokes count) and wakes only when woken there — the same everywhere
+        if (_state == State.Sleep && ServerAsleep) { if (_rub > 110 * App.Scale) { _rub = 0; Strokes++; Heart(); } return; }
         if (_state == State.Sleep) { if (_rub > 40 * App.Scale) { _rub = 0; Wake(); } return; }
         if (_rub > 110 * App.Scale)
         {
@@ -356,7 +358,7 @@ sealed class PetWindow
         if (_state == State.Held) { _state = State.Fall; _vy = 0; _frame = -1; Show(Sprites.Held); Anim(16); return; }
         if (Now - _pressTick < 400)
         {
-            if (_state == State.Sleep) { Wake(); return; }
+            if (_state == State.Sleep) { if (ServerAsleep) Heart(); else Wake(); return; }
             if (IsEgg) { if (_state is State.Idle or State.Pose) Wobble(); return; }
             if (_state is State.Idle or State.Pose or State.Walk) Jump();
         }
