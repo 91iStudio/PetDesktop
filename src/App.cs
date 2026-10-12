@@ -187,8 +187,11 @@ sealed class App
     }
 
     /// <summary>The egg on the taskbar: drawn in the baby's colours; strokes warm it.</summary>
+    DeskEgg? _lastEgg;
+
     void ShowEgg(DeskEgg egg)
     {
+        _lastEgg = egg;
         var look = egg.Look ?? new DeskLook();
         var key = $"{egg.Id}|{look.Base}|{look.Mark}|{look.Pattern}|{_settings.Size}";
         if (key != _eggKey)
@@ -267,7 +270,8 @@ sealed class App
             case 9: DestroyWindow(_pet.Hwnd); break;
             case >= 58 and <= 138:
                 _settings.Size = cmd - 10; Api.SaveSettings(_settings);
-                if (_settings.SheetFile is { } f && File.Exists(f)) Build(f);
+                if (_pet.IsEgg && _lastEgg != null) { _eggKey = null; ShowEgg(_lastEgg); } // the egg is redrawn at the new size right away
+                else if (_settings.SheetFile is { } f && File.Exists(f)) Build(f);
                 break;
         }
     }
