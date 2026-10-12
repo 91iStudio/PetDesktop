@@ -29,6 +29,8 @@ sealed class App
     PetReply? _lastReply;
     int _lastStatus;
     string? _pendingSheet;
+    /// <summary>A choice from the menu («Кто живёт здесь», «Возраст»), sent on the next trip to the site.</summary>
+    (string? petId, bool? baby)? _choice;
     PairReply? _pairReply;
     int _sentStrokes, _sentWarm;
     string? _eggKey;
@@ -142,11 +144,14 @@ sealed class App
         if (_syncing || _settings.Token is not { } token) return;
         _syncing = true;
         int strokes = _pet.Strokes - _sentStrokes, minutes = (int)((_pet.VisibleSeconds - _sentSeconds) / 60), warm = _pet.WarmTaps - _sentWarm;
+        var choice = _choice; _choice = null;
         Task.Run(async () =>
         {
             try
             {
+
                 if (strokes > 0 || minutes > 0 || warm > 0) { await Api.Events(token, strokes, minutes, warm); _sentStrokes += strokes; _sentSeconds += minutes * 60; _sentWarm += warm; }
+                if (choice is { } c) await Api.Choose(token, c.petId, c.baby); // after the strokes: they belong to the pet shown until now
                 var (status, reply) = await Api.Pet(token);
                 _lastStatus = status; _lastReply = reply;
                 if (reply?.Pet?.Sheet is { } url && (url != _settings.SheetUrl || _settings.SheetFile == null || !File.Exists(_settings.SheetFile)))
@@ -164,6 +169,7 @@ sealed class App
         if (pet == null && _lastReply?.Egg is { } egg) { ShowEgg(egg); return; }
         if (pet == null) { if (_lastReply?.Message is { } m) SetTip(m); return; }
         if (pet.Sheet == null && _pet.IsEgg) { SetTip($"{pet.Name} вылупился! Рисуем его портрет — скоро выйдет гулять"); return; }
+        var wasEgg = _pet.IsEgg;
         if (_pet.IsEgg) { _pet.IsEgg = false; _eggKey = null; }
         _settings.Name = pet.Name; _settings.Cols = pet.Cols; _settings.Rows = pet.Rows; _settings.Character = pet.Look?.Character;
         _pet.Character = _settings.Character ?? "";
@@ -174,6 +180,7 @@ sealed class App
             _pendingSheet = null;
             Build(parts[1]);
         }
+        else if (wasEgg && pet.Sheet == _settings.SheetUrl && _settings.SheetFile is { } kept && File.Exists(kept)) Build(kept); // back from an egg to a pet already on disk
         Api.SaveSettings(_settings);
         _pet.Sad = pet.Hungry || pet.Bored || pet.Tired;
         _pet.SetAsleep(pet.Asleep);
@@ -248,6 +255,27 @@ sealed class App
         AppendMenuW(m, MF_STRING, 1, "Открыть сайт питомца");
         if (_settings.Token != null) AppendMenuW(m, MF_STRING, 7, "Спросить сайт сейчас");
         AppendMenuW(m, MF_POPUP, sizes, "Размер");
+        if (_lastReply?.Pets is { List.Count: > 0 } pets)
+        {
+            // whom this computer shows, and how old
+            var who = CreatePopupMenu();
+            AppendMenuW(who, MF_STRING | (pets.Chosen == null ? MF_CHECKED : 0), 200, "Как на сайте");
+            AppendMenuW(who, MF_SEPARATOR, 0, null);
+            for (var i = 0; i < pets.List.Count && i < 40; i++)
+            {
+                var x = pets.List[i];
+                var label = x.Stage == "egg" ? $"{x.Name} (яйцо)" : x.Stage == "baby" ? $"{x.Name} (малыш)" : x.Name;
+                AppendMenuW(who, MF_STRING | (pets.Chosen == x.Id ? MF_CHECKED : 0), 201 + i, label);
+            }
+            AppendMenuW(m, MF_POPUP, who, "Кто живёт здесь");
+            var shownId = _lastReply.Pet?.Id ?? _lastReply.Egg?.Id;
+            var canBaby = pets.List.FirstOrDefault(x => x.Id == shownId)?.CanBeBaby == true;
+            var age = CreatePopupMenu();
+            AppendMenuW(age, MF_STRING | (pets.Baby == null ? MF_CHECKED : 0), 190, "Как на сайте");
+            AppendMenuW(age, MF_STRING | (pets.Baby == true ? MF_CHECKED : 0) | (canBaby ? 0 : MF_GRAYED), 191, "Малышом");
+            AppendMenuW(age, MF_STRING | (pets.Baby == false ? MF_CHECKED : 0) | (canBaby ? 0 : MF_GRAYED), 192, "Взрослым");
+            AppendMenuW(m, MF_POPUP, age, "Возраст");
+        }
         AppendMenuW(m, MF_STRING, 2, _pet.HiddenByUser ? "Показать питомца" : "Спрятать на час");
         AppendMenuW(m, MF_STRING | (Autostart ? MF_CHECKED : 0), 3, "Запускать вместе с Windows");
         AppendMenuW(m, MF_SEPARATOR, 0, null);
@@ -268,7 +296,12 @@ sealed class App
             case 4: OpenPair(); break;
             case 5: OpenJournal(); break;
             case 6: ShowLoad(); break;
-            case 7: Sync(); break; // woken or fed on the site — no need to wait for the 12-minute check
+            case 7: Sync(); break;
+            case 200: Choose(null, _lastReply?.Pets?.Baby); break;
+            case >= 201 and < 241 when _lastReply?.Pets?.List is { } list && cmd - 201 < list.Count: Choose(list[cmd - 201].Id, _lastReply.Pets!.Baby); break;
+            case 190: Choose(_lastReply?.Pets?.Chosen, null); break;
+            case 191: Choose(_lastReply?.Pets?.Chosen, true); break;
+            case 192: Choose(_lastReply?.Pets?.Chosen, false); break; // woken or fed on the site — no need to wait for the 12-minute check
             case 9: DestroyWindow(_pet.Hwnd); break;
             case >= 58 and <= 138:
                 _settings.Size = cmd - 10; Api.SaveSettings(_settings);
@@ -276,6 +309,14 @@ sealed class App
                 else if (_settings.SheetFile is { } f && File.Exists(f)) Build(f);
                 break;
         }
+    }
+
+    /// <summary>A choice from the menu: sent to the site right away, and the pet changes on the answer.</summary>
+    void Choose(string? petId, bool? baby)
+    {
+        _choice = (petId, baby);
+        if (_syncing) return; // goes with the next trip
+        Sync();
     }
 
     static void OpenSite() => ShellExecuteW(IntPtr.Zero, "open", Api.SiteUrl, null, null, SW_SHOW);

@@ -20,7 +20,22 @@ public sealed class Settings
 public sealed class StartReply { public string? Nonce { get; set; } }
 public sealed class PollReply { public string? Token { get; set; } public bool Waiting { get; set; } public bool Expired { get; set; } }
 public sealed class PairReply { public string? Token { get; set; } public string? Error { get; set; } }
-public sealed class PetReply { public DeskPet? Pet { get; set; } public DeskEgg? Egg { get; set; } public string? Message { get; set; } public string? Error { get; set; } }
+public sealed class PetReply { public DeskPet? Pet { get; set; } public DeskEgg? Egg { get; set; } public DeskPets? Pets { get; set; } public string? Message { get; set; } public string? Error { get; set; } }
+/// <summary>The owner's pets, to choose whom this computer shows (Chosen null — the one chosen on the site).</summary>
+public sealed class DeskPets
+{
+    public string? Chosen { get; set; }
+    public bool? Baby { get; set; }
+    public List<DeskPetItem> List { get; set; } = new();
+}
+public sealed class DeskPetItem
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Stage { get; set; } = "";
+    public bool CanBeBaby { get; set; }
+}
+public sealed class ChooseBody { public string? PetId { get; set; } public bool? Baby { get; set; } }
 public sealed class DeskEgg
 {
     public string Id { get; set; } = "";
@@ -64,6 +79,7 @@ public sealed class PairBody { public string Code { get; set; } = ""; }
 [JsonSerializable(typeof(PetReply))]
 [JsonSerializable(typeof(EventsBody))]
 [JsonSerializable(typeof(PairBody))]
+[JsonSerializable(typeof(ChooseBody))]
 partial class Json : JsonSerializerContext;
 
 /// <summary>
@@ -150,6 +166,10 @@ static class Api
         if (status == 0) return (0, null);
         try { return (status, JsonSerializer.Deserialize(body, Json.Default.PetReply)); } catch { return (status, null); }
     }
+
+    /// <summary>Whom this computer shows (null — as on the site) and how old (null — as on the site).</summary>
+    public static Task Choose(string token, string? petId, bool? baby) =>
+        Send(HttpMethod.Post, "/api/desk/choose", JsonSerializer.Serialize(new ChooseBody { PetId = petId, Baby = baby }, Json.Default.ChooseBody), token);
 
     public static Task Events(string token, int strokes, int minutes, int warm) =>
         Send(HttpMethod.Post, "/api/desk/events", JsonSerializer.Serialize(new EventsBody { Strokes = strokes, Minutes = minutes, Warm = warm }, Json.Default.EventsBody), token);
