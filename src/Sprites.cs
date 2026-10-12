@@ -22,6 +22,9 @@ sealed class Sprites : IDisposable
     public int BoxW { get; private set; }
     public int BoxH { get; private set; }
     readonly IntPtr[] _right = new IntPtr[12], _left = new IntPtr[12];
+    /// <summary>The «held» pose turned around the scruff: angles from -12° to +12° in steps of 4°.</summary>
+    public static readonly int[] SwingAngles = { -12, -8, -4, 0, 4, 8, 12 };
+    readonly IntPtr[] _heldRight = new IntPtr[7], _heldLeft = new IntPtr[7];
     public Pixels? Face { get; private set; }
 
     static IntPtr _gdip;
@@ -121,12 +124,18 @@ sealed class Sprites : IDisposable
         var unit = (frames[Stand].H + frames[Sit].H + frames[Wave].H) / 3.0;
         var s = height / unit;
         var scaled = frames.Select(f => Scale(f, (int)Math.Round(f.W * s), (int)Math.Round(f.H * s))).ToList();
-        BoxW = scaled.Max(f => f.W) + 2;
+        // wider than the widest pose: room for the held pose to swing without being clipped
+        BoxW = scaled.Max(f => f.W) + 2 + (int)(scaled.Max(f => f.H) * 0.45);
         BoxH = scaled.Max(f => f.H) + 2;
         for (var i = 0; i < 12; i++)
         {
             _right[i] = Bitmap(scaled[i], false);
             _left[i] = Bitmap(scaled[i], true);
+        }
+        for (var i = 0; i < SwingAngles.Length; i++)
+        {
+            _heldRight[i] = Swung(scaled[Held], SwingAngles[i], false);
+            _heldLeft[i] = Swung(scaled[Held], SwingAngles[i], true);
         }
         Face = scaled[Stand];
     }
@@ -149,11 +158,52 @@ sealed class Sprites : IDisposable
     }
 
     public IntPtr Get(int frame, int dir) => dir < 0 ? _left[frame] : _right[frame];
+    public IntPtr GetHeld(int swing, int dir) => dir < 0 ? _heldLeft[swing] : _heldRight[swing];
+
+    /// <summary>The frame stood in the box like the others, then turned around the scruff (top centre), bilinear.</summary>
+    IntPtr Swung(Pixels f, int degrees, bool mirror)
+    {
+        var box = new Pixels(BoxW, BoxH);
+        int ox = (BoxW - f.W) / 2, oy = BoxH - f.H - 1;
+        for (var y = 0; y < f.H; y++)
+            for (var x = 0; x < f.W; x++)
+                box.Data[(oy + y) * BoxW + ox + (mirror ? f.W - 1 - x : x)] = f.Data[y * f.W + x];
+        double px = BoxW / 2.0, py = oy + f.H * 0.06, a = -degrees * Math.PI / 180, cos = Math.Cos(a), sin = Math.Sin(a);
+        var bmi = new BITMAPINFOHEADER { Size = 40, Width = BoxW, Height = -BoxH, Planes = 1, BitCount = 32 };
+        var hbm = CreateDIBSection(IntPtr.Zero, ref bmi, 0, out var bits, IntPtr.Zero, 0);
+        unsafe
+        {
+            var dst = (uint*)bits;
+            for (var y = 0; y < BoxH; y++)
+                for (var x = 0; x < BoxW; x++)
+                {
+                    double sx = cos * (x - px) - sin * (y - py) + px, sy = sin * (x - px) + cos * (y - py) + py;
+                    dst[y * BoxW + x] = Sample(box, sx, sy);
+                }
+        }
+        return hbm;
+    }
+
+    static uint Sample(Pixels p, double x, double y)
+    {
+        int x0 = (int)Math.Floor(x), y0 = (int)Math.Floor(y);
+        if (x0 < -1 || y0 < -1 || x0 >= p.W || y0 >= p.H) return 0;
+        double fx = x - x0, fy = y - y0;
+        uint At(int xx, int yy) => xx < 0 || yy < 0 || xx >= p.W || yy >= p.H ? 0 : p.Data[yy * p.W + xx];
+        uint c00 = At(x0, y0), c10 = At(x0 + 1, y0), c01 = At(x0, y0 + 1), c11 = At(x0 + 1, y0 + 1);
+        uint Mix(int shift)
+        {
+            double v = ((c00 >> shift) & 255) * (1 - fx) * (1 - fy) + ((c10 >> shift) & 255) * fx * (1 - fy)
+                     + ((c01 >> shift) & 255) * (1 - fx) * fy + ((c11 >> shift) & 255) * fx * fy;
+            return (uint)Math.Clamp(Math.Round(v), 0, 255);
+        }
+        return Mix(24) << 24 | Mix(16) << 16 | Mix(8) << 8 | Mix(0);
+    }
 
     public void Dispose()
     {
-        foreach (var b in _right.Concat(_left)) if (b != IntPtr.Zero) DeleteObject(b);
-        Array.Clear(_right); Array.Clear(_left);
+        foreach (var b in _right.Concat(_left).Concat(_heldRight).Concat(_heldLeft)) if (b != IntPtr.Zero) DeleteObject(b);
+        Array.Clear(_right); Array.Clear(_left); Array.Clear(_heldRight); Array.Clear(_heldLeft);
     }
 
     // ───── Small things drawn in code ─────

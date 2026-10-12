@@ -1,0 +1,4 @@
+# The same bytes on every computer: sources always with LF line endings (a bit-for-bit identical exe).
+* text=auto eol=lf
+*.png binary
+*.ico binary

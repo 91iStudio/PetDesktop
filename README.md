@@ -35,7 +35,7 @@
 
 ## Сборка
 
-Нужен [.NET SDK 10](https://dotnet.microsoft.com/download) (версия — в `global.json`).
+Нужен [.NET SDK 10](https://dotnet.microsoft.com/download) — ровно той версии, что в `global.json` (иначе exe соберётся, но побайтово будет другим).
 
 ```
 dotnet publish -c Release -o out
@@ -56,7 +56,8 @@ dotnet publish -c Release -o out
 gh attestation verify Pushishi.exe --repo 91iStudio/PetDesktop
 ```
 
-Или проще — сравнить SHA-256 с `SHA256SUMS.txt` в релизе и в журнале сборки:
+Или проще — сравнить SHA-256 с `SHA256SUMS.txt` в релизе и в журнале сборки. Можно и собрать самому той же командой, что в
+`.github/workflows/release.yml`, тем же SDK — хеш должен совпасть:
 
 ```
 certutil -hashfile Pushishi.exe SHA256

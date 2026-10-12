@@ -43,6 +43,8 @@ sealed class PetWindow
     public int Strokes, Redraws;
     public double VisibleSeconds;
     int _heartStep = -1;
+    // the pendulum while held: angle in degrees, its speed, and how far the mouse moved since the last tick
+    double _swing, _swingVel; int _lastHeldX, _drawnSwing = -1;
     POINT _heartAt;
 
     public PetWindow(App app, IntPtr instance)
@@ -92,7 +94,7 @@ sealed class PetWindow
     void Draw()
     {
         if (_sprites == null || _frame < 0 || _hiddenByGame || _hiddenByUser) return;
-        var old = SelectObject(_memDc, _sprites.Get(_frame, _dir));
+        var old = SelectObject(_memDc, _state == State.Held && _frame == Sprites.Held ? _sprites.GetHeld(SwingIndex, _dir) : _sprites.Get(_frame, _dir));
         var pos = new POINT { X = (int)Math.Round(_x - BoxW / 2.0), Y = (int)Math.Round(_y - BoxH - _lift) };
         var size = new SIZE { CX = BoxW, CY = BoxH };
         var zero = new POINT();
@@ -100,6 +102,17 @@ sealed class PetWindow
         UpdateLayeredWindow(Hwnd, IntPtr.Zero, ref pos, ref size, _memDc, ref zero, 0, ref blend, ULW_ALPHA);
         SelectObject(_memDc, old);
         Redraws++;
+    }
+
+    int SwingIndex
+    {
+        get
+        {
+            var a = Sprites.SwingAngles;
+            var best = 0;
+            for (var i = 1; i < a.Length; i++) if (Math.Abs(a[i] - _swing) < Math.Abs(a[best] - _swing)) best = i;
+            return best;
+        }
     }
 
     void Anim(uint ms) => SetTimer(Hwnd, TimerAnim, ms, IntPtr.Zero);
@@ -212,6 +225,17 @@ sealed class PetWindow
                 Draw();
                 if (k >= 1) { _lift = 0; Draw(); Pose(Sprites.Happy, 500); }
                 break;
+            case State.Held:
+                {
+                    // a pendulum: pulled back to the middle, slowly calming down, pushed by the hand moving sideways
+                    GetCursorPos(out var hp);
+                    var push = (hp.X - _lastHeldX) / App.Scale; _lastHeldX = hp.X;
+                    _swingVel += -0.35 * _swing - 0.08 * _swingVel - push * 0.5;
+                    _swing = Math.Clamp(_swing + _swingVel, -12, 12);
+                    var idx = SwingIndex;
+                    if (idx != _drawnSwing) { _drawnSwing = idx; Draw(); }
+                }
+                break;
             case State.Fall:
                 _vy += 1.6 * App.Scale; _y += _vy;
                 if (_y >= Floor) { _y = Floor; Draw(); Pose(Sprites.Happy, 700); }
@@ -286,8 +310,10 @@ sealed class PetWindow
         {
             if (_state != State.Held && Math.Abs(p.X - _pressAt.X) + Math.Abs(p.Y - _pressAt.Y) > 6 * App.Scale)
             {
-                _state = State.Held; StopAnim(); KillTimer(Hwnd, TimerCursor); _lift = 0;
+                _state = State.Held; KillTimer(Hwnd, TimerCursor); _lift = 0;
+                _swing = 0; _swingVel = 6; _lastHeldX = p.X;
                 _frame = -1; Show(Sprites.Held);
+                Anim(85); // the swing: ~12 frames a second, only while held
             }
             if (_state == State.Held) { _x = p.X; _y = Math.Min(Floor, p.Y + BoxH * 0.88); Draw(); }
             return;
@@ -317,7 +343,7 @@ sealed class PetWindow
         ReleaseCapture();
         if (!was) return;
         _lastTouch = DateTime.Now;
-        if (_state == State.Held) { _state = State.Fall; _vy = 0; Anim(16); return; }
+        if (_state == State.Held) { _state = State.Fall; _vy = 0; _frame = -1; Show(Sprites.Held); Anim(16); return; }
         if (Now - _pressTick < 400)
         {
             if (_state == State.Sleep) { Wake(); return; }
