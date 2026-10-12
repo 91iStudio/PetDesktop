@@ -245,7 +245,12 @@ sealed class PetWindow
                 break;
             case State.Fall:
                 _vy += 1.6 * App.Scale; _y += _vy;
-                if (_y >= Floor) { _y = Floor; Draw(); Pose(Sprites.Happy, 700); }
+                if (_y >= Floor)
+                {
+                    _y = Floor; Draw();
+                    // asleep on the site: a sleepy blink and it curls up right where it landed (no walk back to the clock)
+                    if (ServerAsleep) Pose(Sprites.Blink, 500, Sleep); else Pose(Sprites.Happy, 700);
+                }
                 else Draw();
                 break;
             default: StopAnim(); break;
