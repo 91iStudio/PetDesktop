@@ -57,7 +57,7 @@ gh attestation verify Pushishi.exe --repo 91iStudio/PetDesktop
 ```
 
 Или проще — сравнить SHA-256 с `SHA256SUMS.txt` в релизе и в журнале сборки. Можно и собрать самому той же командой, что в
-`.github/workflows/release.yml`, тем же SDK — хеш должен совпасть:
+`.github/workflows/release.yml`, тем же SDK — хеш совпадёт бит в бит (проверено на v0.2.0):
 
 ```
 certutil -hashfile Pushishi.exe SHA256
