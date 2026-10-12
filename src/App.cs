@@ -30,7 +30,9 @@ sealed class App
     int _lastStatus;
     string? _pendingSheet;
     PairReply? _pairReply;
-    int _sentStrokes;
+    int _sentStrokes, _sentWarm;
+    string? _eggKey;
+    int _eggMinutesLeft = -1;
     double _sentSeconds;
 
     [STAThread]
@@ -139,12 +141,12 @@ sealed class App
     {
         if (_syncing || _settings.Token is not { } token) return;
         _syncing = true;
-        int strokes = _pet.Strokes - _sentStrokes, minutes = (int)((_pet.VisibleSeconds - _sentSeconds) / 60);
+        int strokes = _pet.Strokes - _sentStrokes, minutes = (int)((_pet.VisibleSeconds - _sentSeconds) / 60), warm = _pet.WarmTaps - _sentWarm;
         Task.Run(async () =>
         {
             try
             {
-                if (strokes > 0 || minutes > 0) { await Api.Events(token, strokes, minutes); _sentStrokes += strokes; _sentSeconds += minutes * 60; }
+                if (strokes > 0 || minutes > 0 || warm > 0) { await Api.Events(token, strokes, minutes, warm); _sentStrokes += strokes; _sentSeconds += minutes * 60; _sentWarm += warm; }
                 var (status, reply) = await Api.Pet(token);
                 _lastStatus = status; _lastReply = reply;
                 if (reply?.Pet?.Sheet is { } url && (url != _settings.SheetUrl || _settings.SheetFile == null || !File.Exists(_settings.SheetFile)))
@@ -159,7 +161,10 @@ sealed class App
         _syncing = false;
         if (_lastStatus == 401) { _settings.Token = null; Api.SaveSettings(_settings); SetTip("Пушиши — питомец не привязан"); OpenPair(); return; }
         var pet = _lastReply?.Pet;
+        if (pet == null && _lastReply?.Egg is { } egg) { ShowEgg(egg); return; }
         if (pet == null) { if (_lastReply?.Message is { } m) SetTip(m); return; }
+        if (pet.Sheet == null && _pet.IsEgg) { SetTip($"{pet.Name} вылупился! Рисуем его портрет — скоро выйдет гулять"); return; }
+        if (_pet.IsEgg) { _pet.IsEgg = false; _eggKey = null; }
         _settings.Name = pet.Name; _settings.Cols = pet.Cols; _settings.Rows = pet.Rows; _settings.Character = pet.Look?.Character;
         _pet.Character = _settings.Character ?? "";
         if (_pendingSheet is { } ps)
@@ -180,6 +185,31 @@ sealed class App
             : pet.Sheet == null ? $"{pet.Name}: портрет ещё рисуется"
             : pet.Name);
     }
+
+    /// <summary>The egg on the taskbar: drawn in the baby's colours; strokes warm it.</summary>
+    void ShowEgg(DeskEgg egg)
+    {
+        var look = egg.Look ?? new DeskLook();
+        var key = $"{egg.Id}|{look.Base}|{look.Mark}|{look.Pattern}|{_settings.Size}";
+        if (key != _eggKey)
+        {
+            _eggKey = key;
+            uint b = Sprites.Hex(look.Base, 0xFFF4E3C3), m = Sprites.Hex(look.Mark, 0xFFB9A3E3);
+            int h = (int)(_settings.Size * Scale * 0.9);
+            Pixels Tilt(double d) => Sprites.Egg(h, b, m, look.Pattern, look.Rare, d);
+            Pixels up = Tilt(0), left = Tilt(-7), right = Tilt(7);
+            var frames = new List<Pixels> { up, up, left, right, up, right, up, up, up, up, up, up };
+            _pet.IsEgg = true;
+            _pet.SetSprites(new Sprites(frames, h));
+            if (Sprites.Icon(Sprites.PetFace(64), 32) is var icon) SetIcon(icon);
+        }
+        _eggMinutesLeft = egg.MinutesLeft;
+        var left2 = egg.MinutesLeft;
+        SetTip(left2 <= 0 ? "Тук-тук! Малыш стучится — откройте сайт, чтобы он вылупился (двойной щелчок по яйцу)"
+            : $"Яйцо: малыш вылупится через {(left2 >= 60 ? $"{left2 / 60} ч " : "")}{left2 % 60} мин." + (egg.WarmLeft > 0 ? " Погладьте яйцо мышкой — согреете!" : ""));
+    }
+
+    public void EggDoubleClick() => OpenSite();
 
     // ───── Tray ─────
 
@@ -320,7 +350,7 @@ sealed class App
         y += (int)(40 * Scale);
         Child("STATIC", "Он живёт на сайте pet.91i.ru. Привяжите его — и он придёт гулять по панели задач.", SS_CENTER, pad, y, cw, (int)(42 * Scale), IdSub);
         y += (int)(56 * Scale);
-        var open = Child("BUTTON", "Открыть сайт и привязать", WS_TABSTOP | BS_DEFPUSHBUTTON, pad + (int)(30 * Scale), y, cw - (int)(60 * Scale), (int)(48 * Scale), IdOpen);
+        var open = Child("BUTTON", "Открыть сайт и привязать", WS_TABSTOP, pad + (int)(30 * Scale), y, cw - (int)(60 * Scale), (int)(48 * Scale), IdOpen);
         SendMessageW(open, WM_SETFONT, _bigFont, 1);
         y += (int)(66 * Scale);
         Child("STATIC", "или введите код с сайта:\nменю ☰ → «Питомец на рабочем столе»", SS_CENTER, pad, y, cw, (int)(42 * Scale), IdOr);
@@ -394,11 +424,10 @@ sealed class App
                     StartPair(code);
                     return IntPtr.Zero;
                 }
-            case WM_COMMAND when ((int)wp & 0xFFFF) == 1: // Enter: the code if one is typed, else the big button
+            case WM_COMMAND when ((int)wp & 0xFFFF) == 1: // Enter: only a typed code counts; the browser opens only by the button
                 {
                     var buf = stackalloc char[16];
                     if (GetWindowTextW(GetDlgItem(h, IdCode), buf, 16) > 0) return PairProc(h, WM_COMMAND, IdButton, IntPtr.Zero);
-                    OpenSiteToPair();
                     return IntPtr.Zero;
                 }
             case WM_TIMER when (int)wp == TimerPoll:
@@ -476,7 +505,9 @@ sealed class App
         if (r?.Token is { Length: > 0 } token)
         {
             _nonce = null;
-            _settings.Token = token; _settings.SheetUrl = null; Api.SaveSettings(_settings);
+            // another pet may come now: forget the old one's picture
+            _settings.Token = token; _settings.SheetUrl = null; _settings.SheetFile = null; _settings.Name = null; Api.SaveSettings(_settings);
+            _sentStrokes = _pet.Strokes; _sentWarm = _pet.WarmTaps;
             if (_pairHwnd != IntPtr.Zero) { KillTimer(_pairHwnd, TimerPoll); DestroyWindow(_pairHwnd); _pairHwnd = IntPtr.Zero; FreePicture(); }
             Sync();
             return;

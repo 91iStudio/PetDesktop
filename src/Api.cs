@@ -20,7 +20,15 @@ public sealed class Settings
 public sealed class StartReply { public string? Nonce { get; set; } }
 public sealed class PollReply { public string? Token { get; set; } public bool Waiting { get; set; } public bool Expired { get; set; } }
 public sealed class PairReply { public string? Token { get; set; } public string? Error { get; set; } }
-public sealed class PetReply { public DeskPet? Pet { get; set; } public string? Message { get; set; } public string? Error { get; set; } }
+public sealed class PetReply { public DeskPet? Pet { get; set; } public DeskEgg? Egg { get; set; } public string? Message { get; set; } public string? Error { get; set; } }
+public sealed class DeskEgg
+{
+    public string Id { get; set; } = "";
+    public DeskLook? Look { get; set; }
+    public int MinutesLeft { get; set; }
+    public double WarmLeft { get; set; }
+    public double WarmPerTap { get; set; }
+}
 public sealed class DeskPet
 {
     public string Id { get; set; } = "";
@@ -36,8 +44,16 @@ public sealed class DeskPet
     public bool Bored { get; set; }
     public bool Tired { get; set; }
 }
-public sealed class DeskLook { public string? Character { get; set; } public string? Size { get; set; } }
-public sealed class EventsBody { public int Strokes { get; set; } public int Minutes { get; set; } }
+public sealed class DeskLook
+{
+    public string? Character { get; set; }
+    public string? Size { get; set; }
+    public string? Base { get; set; }
+    public string? Mark { get; set; }
+    public string? Pattern { get; set; }
+    public bool Rare { get; set; }
+}
+public sealed class EventsBody { public int Strokes { get; set; } public int Minutes { get; set; } public int Warm { get; set; } }
 public sealed class PairBody { public string Code { get; set; } = ""; }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
@@ -135,8 +151,8 @@ static class Api
         try { return (status, JsonSerializer.Deserialize(body, Json.Default.PetReply)); } catch { return (status, null); }
     }
 
-    public static Task Events(string token, int strokes, int minutes) =>
-        Send(HttpMethod.Post, "/api/desk/events", JsonSerializer.Serialize(new EventsBody { Strokes = strokes, Minutes = minutes }, Json.Default.EventsBody), token);
+    public static Task Events(string token, int strokes, int minutes, int warm) =>
+        Send(HttpMethod.Post, "/api/desk/events", JsonSerializer.Serialize(new EventsBody { Strokes = strokes, Minutes = minutes, Warm = warm }, Json.Default.EventsBody), token);
 
     /// <summary>The pet's picture sheet (a public PNG). Kept on disk, so the pet lives on without internet.</summary>
     public static async Task<string?> Download(string url)

@@ -33,6 +33,9 @@ sealed class PetWindow
     long _jumpStart;
     bool _hiddenByGame, _hiddenByUser, _batterySaver;
     public bool Sad, ServerAsleep;
+    /// <summary>The baby is still inside: the egg sits on the taskbar, wobbles now and then, and strokes warm it.</summary>
+    public bool IsEgg;
+    public int WarmTaps;
     public string Character = "";
     DateTime _lastTouch = DateTime.Now;
 
@@ -134,10 +137,11 @@ sealed class PetWindow
 
     void Decide()
     {
+        if (IsEgg) { Wobble(); return; }
         var hour = DateTime.Now.Hour;
         var lonely = (DateTime.Now - _lastTouch).TotalMinutes;
         var sleepy = Character == "sleepy" ? 0.25 : 0.08;
-        if (ServerAsleep || _batterySaver || hour >= 23 || hour < 7 || (lonely > 20 && _rng.NextDouble() < sleepy)) { GoSleep(); return; }
+        if (!IsEgg && (ServerAsleep || _batterySaver) || hour >= 23 || hour < 7 || (lonely > 20 && _rng.NextDouble() < sleepy)) { GoSleep(); return; }
         var r = _rng.NextDouble();
         if (Sad && r < 0.3) { Pose(Sprites.Sad, 2500); return; }
         if (r < 0.5) { Wander(); return; }
@@ -146,6 +150,9 @@ sealed class PetWindow
         if (r < 0.9 || Character == "playful") { Pose(Sprites.Play, 2200); return; }
         Pose(Sprites.Happy, 900);
     }
+
+    /// <summary>The egg rocks a little: left, right, left, still.</summary>
+    void Wobble() => Pose(Sprites.Walk1, 130, () => Pose(Sprites.Walk2, 130, () => Pose(Sprites.Walk1, 130, () => Idle())));
 
     void Pose(int frame, int ms, Action? then = null)
     {
@@ -287,6 +294,7 @@ sealed class PetWindow
     public void SetAsleep(bool asleep)
     {
         var was = ServerAsleep; ServerAsleep = asleep;
+        if (IsEgg) return;
         if (_sprites == null || _state is State.Hidden or State.Held or State.Fall) return;
         if (asleep && !was && _state != State.Sleep) GoSleep();
         if (!asleep && was && _state == State.Sleep) Wake();
@@ -323,8 +331,10 @@ sealed class PetWindow
         if (_state == State.Sleep) { if (_rub > 40 * App.Scale) { _rub = 0; Wake(); } return; }
         if (_rub > 110 * App.Scale)
         {
-            _rub = 0; Strokes++; _lastTouch = DateTime.Now;
+            _rub = 0; _lastTouch = DateTime.Now;
             Heart();
+            if (IsEgg) { WarmTaps++; if (_state != State.Pose) Wobble(); return; }
+            Strokes++;
             if (_state != State.Walk) Pose(Sprites.Happy, 800);
         }
     }
@@ -347,6 +357,7 @@ sealed class PetWindow
         if (Now - _pressTick < 400)
         {
             if (_state == State.Sleep) { Wake(); return; }
+            if (IsEgg) { if (_state is State.Idle or State.Pose) Wobble(); return; }
             if (_state is State.Idle or State.Pose or State.Walk) Jump();
         }
     }
@@ -396,7 +407,7 @@ sealed class PetWindow
             case WM_MOUSELEAVE: _tracking = false; _rub = 0; return IntPtr.Zero;
             case WM_LBUTTONDOWN: OnDown(); return IntPtr.Zero;
             case WM_LBUTTONUP: OnUp(); return IntPtr.Zero;
-            case WM_LBUTTONDBLCLK: if (_state is State.Idle or State.Pose) Jump(); return IntPtr.Zero;
+            case WM_LBUTTONDBLCLK: if (IsEgg) _app.EggDoubleClick(); else if (_state is State.Idle or State.Pose) Jump(); return IntPtr.Zero;
             case WM_RBUTTONUP: _app.ShowMenu(); return IntPtr.Zero;
             case WM_DISPLAYCHANGE:
             case WM_SETTINGCHANGE: ReadWorkArea(); break;

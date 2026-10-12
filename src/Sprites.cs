@@ -283,6 +283,82 @@ sealed class Sprites : IDisposable
         return p;
     }
 
+    /// <summary>
+    /// The egg, while the baby is inside: the baby's own colours and pattern (the same egg as on the site), a glossy
+    /// highlight and the dark-brown outline; tilted around the bottom for the wobble. Drawn in code, supersampled.
+    /// </summary>
+    public static Pixels Egg(int size, uint baseColor, uint mark, string? pattern, bool rare, double tiltDeg)
+    {
+        int w = (int)(size * 0.8), h = size;
+        var p = new Pixels(w, h);
+        const int ss = 3;
+        double a = tiltDeg * Math.PI / 180, cos = Math.Cos(a), sin = Math.Sin(a);
+        double cx = w / 2.0, cy = h * 0.56, ry = h * 0.43, rx = w * 0.4, outline = Math.Max(1.6, size / 34.0);
+        // the egg: an ellipse a little wider at the bottom
+        bool Inside(double x, double y, double grow)
+        {
+            var v = (y - cy) / (ry + grow);
+            var k = rx * (1 + 0.14 * v) + grow;
+            return (x - cx) * (x - cx) / (k * k) + v * v <= 1;
+        }
+        static uint Rgb(uint c) => c & 0xFFFFFF;
+        uint lighter = Mix(Rgb(baseColor), 0xFFFFFF, 0.25), darker = Mix(Rgb(baseColor), 0x000000, 0.12);
+        var rng = new Random((int)(Rgb(baseColor) ^ Rgb(mark) ^ (uint)(pattern?.Length ?? 0) * 7919u)); // the same egg every time
+        var spots = Enumerable.Range(0, 9).Select(_ => (x: cx + (rng.NextDouble() - 0.5) * rx * 1.7, y: cy + (rng.NextDouble() - 0.6) * ry * 1.6, r: size * (0.04 + rng.NextDouble() * 0.04))).ToArray();
+        uint Color(double x, double y)
+        {
+            // turn the point back around the bottom of the egg (the wobble)
+            double px = x - cx, py = y - (cy + ry);
+            double ux = cos * px + sin * py + cx, uy = -sin * px + cos * py + cy + ry;
+            if (!Inside(ux, uy, outline)) return 0;
+            if (!Inside(ux, uy, 0)) return 0xFF6B4430;
+            var shade = (uy - (cy - ry)) / (2 * ry);
+            var c = Mix(lighter, darker, Math.Clamp(shade * 1.1 - (ux - cx) / rx * 0.15, 0, 1));
+            var onMark = pattern switch
+            {
+                "spots" => spots.Any(s => (ux - s.x) * (ux - s.x) + (uy - s.y) * (uy - s.y) < s.r * s.r),
+                "stripes" => Math.Abs(Math.Sin((uy - (ux - cx) * 0.25) / (size * 0.085))) > 0.72,
+                "socks" => uy > cy + ry * 0.55,
+                "patches" => spots.Take(3).Any(s => (ux - s.x) * (ux - s.x) / 2.2 + (uy - s.y) * (uy - s.y) / 1.4 < s.r * s.r * 3),
+                "stars" => spots.Any(s => Math.Abs(ux - s.x) + Math.Abs(uy - s.y) < s.r * 0.9),
+                "heart" => (ux - cx) * (ux - cx) + (uy - cy - ry * 0.15) * (uy - cy - ry * 0.15) < size * size * 0.012,
+                _ => false,
+            };
+            if (onMark) c = Rgb(mark);
+            if (rare && spots.Skip(4).Any(s => Math.Abs(ux - s.x) + Math.Abs(uy - s.y) < size * 0.018)) c = 0xFFFFFF;
+            // glossy highlight, upper left
+            var hx = (ux - (cx - rx * 0.38)) / (rx * 0.2); var hy = (uy - (cy - ry * 0.45)) / (ry * 0.16);
+            if (hx * hx + hy * hy < 1) c = Mix(c, 0xFFFFFF, 0.45);
+            return 0xFF000000 | c;
+        }
+        for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
+            {
+                double A = 0, R = 0, G = 0, B = 0;
+                for (var sy = 0; sy < ss; sy++)
+                    for (var sx = 0; sx < ss; sx++)
+                    {
+                        var c = Color(x + (sx + 0.5) / ss, y + (sy + 0.5) / ss);
+                        if (c == 0) continue;
+                        A++; R += (c >> 16) & 255; G += (c >> 8) & 255; B += c & 255;
+                    }
+                if (A == 0) continue;
+                var n = (double)(ss * ss);
+                p.Data[y * w + x] = (uint)(A / n * 255) << 24 | (uint)(R / n) << 16 | (uint)(G / n) << 8 | (uint)(B / n);
+            }
+        return p;
+    }
+
+    static uint Mix(uint a, uint b, double t)
+    {
+        uint Ch(int s) => (uint)Math.Round(((a >> s) & 255) * (1 - t) + ((b >> s) & 255) * t);
+        return Ch(16) << 16 | Ch(8) << 8 | Ch(0);
+    }
+
+    /// <summary>"#RRGGBB" → 0xFFRRGGBB.</summary>
+    public static uint Hex(string? s, uint fallback) =>
+        s is { Length: 7 } && s[0] == '#' && uint.TryParse(s.AsSpan(1), System.Globalization.NumberStyles.HexNumber, null, out var v) ? 0xFF000000 | v : fallback;
+
     /// <summary>A tray icon from a picture (the pet's face, or the heart before there is a pet).</summary>
     public static IntPtr Icon(Pixels src, int size)
     {
