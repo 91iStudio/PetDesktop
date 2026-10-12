@@ -131,7 +131,8 @@ sealed class App
         var sheet = Sprites.LoadPng(file);
         if (sheet == null) return;
         var frames = Sprites.Cut(sheet, _settings.Cols, _settings.Rows);
-        var sprites = new Sprites(frames, (int)(_settings.Size * Scale));
+        var grown = _settings.Stage == "adult" ? 1.2 : 1.0; // a grown-up stands a fifth taller than a baby
+        var sprites = new Sprites(frames, (int)(_settings.Size * Scale * grown));
         _pet.SetSprites(sprites);
         if (sprites.Face != null) SetIcon(Sprites.Icon(sprites.Face, (int)(16 * Scale) < 20 ? 16 : 32));
         // the big sheet and the unscaled frames are not needed any more: give the memory back right away
@@ -171,7 +172,7 @@ sealed class App
         if (pet.Sheet == null && _pet.IsEgg) { SetTip($"{pet.Name} вылупился! Рисуем его портрет — скоро выйдет гулять"); return; }
         var wasEgg = _pet.IsEgg;
         if (_pet.IsEgg) { _pet.IsEgg = false; _eggKey = null; }
-        _settings.Name = pet.Name; _settings.Cols = pet.Cols; _settings.Rows = pet.Rows; _settings.Character = pet.Look?.Character;
+        _settings.Name = pet.Name; _settings.Stage = pet.Stage; _settings.Cols = pet.Cols; _settings.Rows = pet.Rows; _settings.Character = pet.Look?.Character;
         _pet.Character = _settings.Character ?? "";
         if (_pendingSheet is { } ps)
         {

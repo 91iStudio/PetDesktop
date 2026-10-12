@@ -15,6 +15,8 @@ public sealed class Settings
     public int Cols { get; set; } = 4;
     public int Rows { get; set; } = 3;
     public string? Character { get; set; }
+    /// <summary>baby | adult: a grown-up is drawn a fifth taller than a baby.</summary>
+    public string? Stage { get; set; }
 }
 
 public sealed class StartReply { public string? Nonce { get; set; } }

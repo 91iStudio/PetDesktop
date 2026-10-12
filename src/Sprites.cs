@@ -60,7 +60,9 @@ sealed class Sprites : IDisposable
         var rowSum = new int[sheet.H]; var colSum = new int[sheet.W];
         for (var y = 0; y < sheet.H; y++)
             for (var x = 0; x < sheet.W; x += 2)
-                if (sheet.A(x, y) > 40) { rowSum[y]++; colSum[x]++; }
+                // a sampled pixel counts for its neighbour column too: otherwise every odd column looks empty and the cut
+                // lands on the bare grid line, slicing a paw or a tail of the next pose into this one
+                if (sheet.A(x, y) > 40) { rowSum[y]++; colSum[x]++; if (x + 1 < sheet.W) colSum[x + 1]++; }
         int[] Cuts(int[] sum, int n, int size)
         {
             var o = new int[n + 1]; o[n] = size;
