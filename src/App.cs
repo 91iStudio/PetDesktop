@@ -246,6 +246,7 @@ sealed class App
         foreach (var (px, label) in new[] { (48, "Крошечный"), (64, "Обычный"), (96, "Большой"), (128, "Огромный") })
             AppendMenuW(sizes, MF_STRING | (_settings.Size == px ? MF_CHECKED : 0), 10 + px, label);
         AppendMenuW(m, MF_STRING, 1, "Открыть сайт питомца");
+        if (_settings.Token != null) AppendMenuW(m, MF_STRING, 7, "Спросить сайт сейчас");
         AppendMenuW(m, MF_POPUP, sizes, "Размер");
         AppendMenuW(m, MF_STRING, 2, _pet.HiddenByUser ? "Показать питомца" : "Спрятать на час");
         AppendMenuW(m, MF_STRING | (Autostart ? MF_CHECKED : 0), 3, "Запускать вместе с Windows");
@@ -267,6 +268,7 @@ sealed class App
             case 4: OpenPair(); break;
             case 5: OpenJournal(); break;
             case 6: ShowLoad(); break;
+            case 7: Sync(); break; // woken or fed on the site — no need to wait for the 12-minute check
             case 9: DestroyWindow(_pet.Hwnd); break;
             case >= 58 and <= 138:
                 _settings.Size = cmd - 10; Api.SaveSettings(_settings);
