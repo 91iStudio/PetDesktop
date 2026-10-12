@@ -1,0 +1,44 @@
+# A release is built here, in the open, from the tagged commit — never on someone's computer.
+# GitHub signs a provenance attestation for the exe: anyone can check that a file is exactly this build.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet publish PetDesktop.csproj -c Release -o out -p:ContinuousIntegrationBuild=true -p:Deterministic=true
+
+      - name: SHA-256
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash out/Pushishi.exe -Algorithm SHA256).Hash.ToLower()
+          "$h  Pushishi.exe" | Out-File -Encoding ascii out/SHA256SUMS.txt
+          "SHA-256: $h" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: out/Pushishi.exe
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/Pushishi.exe
+            out/SHA256SUMS.txt
