@@ -17,6 +17,8 @@ public sealed class Settings
     public string? Character { get; set; }
 }
 
+public sealed class StartReply { public string? Nonce { get; set; } }
+public sealed class PollReply { public string? Token { get; set; } public bool Waiting { get; set; } public bool Expired { get; set; } }
 public sealed class PairReply { public string? Token { get; set; } public string? Error { get; set; } }
 public sealed class PetReply { public DeskPet? Pet { get; set; } public string? Message { get; set; } public string? Error { get; set; } }
 public sealed class DeskPet
@@ -41,6 +43,8 @@ public sealed class PairBody { public string Code { get; set; } = ""; }
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(Settings))]
 [JsonSerializable(typeof(PairReply))]
+[JsonSerializable(typeof(StartReply))]
+[JsonSerializable(typeof(PollReply))]
 [JsonSerializable(typeof(PetReply))]
 [JsonSerializable(typeof(EventsBody))]
 [JsonSerializable(typeof(PairBody))]
@@ -73,7 +77,9 @@ static class Api
         }
     }
 
-    static async Task<(int status, string body)> Send(HttpMethod method, string path, string? json, string? token)
+    static string? _lastQuiet;
+
+    static async Task<(int status, string body)> Send(HttpMethod method, string path, string? json, string? token, bool quiet = false)
     {
         var url = BaseUrl + path;
         using var req = new HttpRequestMessage(method, url);
@@ -84,7 +90,10 @@ static class Api
         {
             using var resp = await Http.SendAsync(req);
             var body = await resp.Content.ReadAsStringAsync();
-            Journal($"{sent}  → {(int)resp.StatusCode}");
+            // the wait for the site's confirmation asks every 2 s: written to the journal once, not hundreds of times
+            var line = $"{sent}  → {(int)resp.StatusCode}";
+            if (!quiet || line != _lastQuiet) Journal(quiet ? line + "  (повторяется каждые 2 с, пока ждём подтверждения на сайте)" : line);
+            if (quiet) _lastQuiet = line;
             return ((int)resp.StatusCode, body);
         }
         catch (Exception e)
@@ -102,6 +111,21 @@ static class Api
         if (status == 0) return new PairReply { Error = "Нет связи с сайтом. Проверьте интернет." };
         try { return JsonSerializer.Deserialize(body, Json.Default.PairReply) ?? new PairReply { Error = "Непонятный ответ" }; }
         catch { return new PairReply { Error = "Непонятный ответ сайта" }; }
+    }
+
+    /// <summary>A one-time link to open the site with (the player confirms there, in their own browser).</summary>
+    public static async Task<string?> DeskStart()
+    {
+        var (status, body) = await Send(HttpMethod.Post, "/api/desk/start", "{}", null);
+        if (status != 200) return null;
+        try { return JsonSerializer.Deserialize(body, Json.Default.StartReply)?.Nonce; } catch { return null; }
+    }
+
+    public static async Task<PollReply?> DeskPoll(string nonce)
+    {
+        var (status, body) = await Send(HttpMethod.Get, "/api/desk/poll?nonce=" + Uri.EscapeDataString(nonce), null, null, quiet: true);
+        if (status != 200) return null;
+        try { return JsonSerializer.Deserialize(body, Json.Default.PollReply); } catch { return null; }
     }
 
     public static async Task<(int status, PetReply? reply)> Pet(string token)

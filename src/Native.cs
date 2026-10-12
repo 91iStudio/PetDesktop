@@ -8,7 +8,7 @@ static unsafe class Native
     public const uint WM_DESTROY = 0x0002, WM_CLOSE = 0x0010, WM_TIMER = 0x0113, WM_COMMAND = 0x0111, WM_SETFONT = 0x0030,
         WM_MOUSEMOVE = 0x0200, WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202, WM_LBUTTONDBLCLK = 0x0203,
         WM_RBUTTONUP = 0x0205, WM_MOUSELEAVE = 0x02A3, WM_DISPLAYCHANGE = 0x007E, WM_SETTINGCHANGE = 0x001A,
-        WM_DPICHANGED = 0x02E0, WM_APP = 0x8000, WM_CTLCOLORSTATIC = 0x0138;
+        WM_DPICHANGED = 0x02E0, WM_APP = 0x8000, WM_CTLCOLORSTATIC = 0x0138, WM_PAINT = 0x000F, WM_SETICON = 0x0080, WM_CTLCOLOREDIT = 0x0133;
 
     public const uint WS_POPUP = 0x80000000, WS_VISIBLE = 0x10000000, WS_CHILD = 0x40000000, WS_CAPTION = 0x00C00000,
         WS_SYSMENU = 0x00080000, WS_TABSTOP = 0x00010000, WS_BORDER = 0x00800000, WS_MINIMIZEBOX = 0x00020000;
@@ -109,6 +109,22 @@ static unsafe class Native
     [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
     [DllImport("user32.dll")] public static extern uint GetSysColor(int index);
     [DllImport("user32.dll")] public static extern IntPtr GetSysColorBrush(int index);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PAINTSTRUCT { public IntPtr Hdc; public int Erase; public RECT Paint; public int Restore, IncUpdate; public fixed byte Reserved[32]; }
+    [DllImport("user32.dll")] public static extern IntPtr BeginPaint(IntPtr h, out PAINTSTRUCT ps);
+    [DllImport("user32.dll")] public static extern bool EndPaint(IntPtr h, ref PAINTSTRUCT ps);
+    [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
+    [DllImport("msimg32.dll")] public static extern bool AlphaBlend(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, int sw, int sh, BLENDFUNCTION blend);
+    [DllImport("gdi32.dll")] public static extern uint SetTextColor(IntPtr dc, uint color);
+    [DllImport("gdi32.dll")] public static extern int SetBkMode(IntPtr dc, int mode);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] public static extern uint SetBkColor(IntPtr dc, uint color);
+    [DllImport("user32.dll")] public static extern int FillRect(IntPtr dc, ref RECT r, IntPtr brush);
+    public const uint WM_ERASEBKGND = 0x0014;
+
+    [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int value, int size);
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] public static extern int SetWindowTheme(IntPtr h, string? app, string? idList);
 
     // ───── gdi32 ─────
     [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr dc);

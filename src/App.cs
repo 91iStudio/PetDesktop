@@ -107,7 +107,7 @@ sealed class App
                 else if (what == WM_LBUTTONDBLCLK) OpenSite();
                 return IntPtr.Zero;
             case WM_SYNCED: OnSynced(); return IntPtr.Zero;
-            case WM_PAIRED: OnPaired(); return IntPtr.Zero;
+            case WM_PAIRED: OnPaired(wp != IntPtr.Zero); return IntPtr.Zero;
             case WM_DESTROY: PostQuitMessage(0); return IntPtr.Zero;
         }
         return DefWindowProcW(h, msg, wp, lp);
@@ -186,7 +186,7 @@ sealed class App
     unsafe void AddTray()
     {
         _tray = new NOTIFYICONDATAW { Size = (uint)sizeof(NOTIFYICONDATAW), Hwnd = _pet.Hwnd, Id = 1, Flags = NIF_MESSAGE | NIF_ICON | NIF_TIP, CallbackMessage = WM_TRAY };
-        _trayIcon = Sprites.Icon(Sprites.Heart(64), 32);
+        _trayIcon = Sprites.Icon(Sprites.PetFace(64), 32);
         _tray.Icon = _trayIcon;
         Write(ref _tray, "Пушиши");
         Shell_NotifyIconW(NIM_ADD, ref _tray);
@@ -277,24 +277,65 @@ sealed class App
         }
     }
 
-    // ───── Pairing: the code from the site ─────
+    // ───── Pairing: one click on the site (or the code from its menu) ─────
+
+    const int IdOpen = 104, IdTitle = 105, IdSub = 106, IdOr = 107, TimerPoll = 7;
+    IntPtr _titleFont, _bigFont, _codeFont, _faceBmp, _white;
+    bool _dark;
+    readonly IntPtr _editDark = CreateSolidBrush(0x2B2B2B);
+
+    /// <summary>Windows in dark mode (apps): the same setting the system's own windows follow.</summary>
+    static bool SystemDark()
+    {
+        using var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        return k?.GetValue("AppsUseLightTheme") is int v && v == 0;
+    }
+    int _faceSize;
+    string? _nonce;
+    DateTime _pollUntil;
+
+    int PairW => (int)(470 * Scale);
 
     void OpenPair()
     {
         if (_pairHwnd != IntPtr.Zero) { SetForegroundWindow(_pairHwnd); return; }
-        int W = (int)(420 * Scale), H = (int)(250 * Scale);
-        GetCursorPos(out _);
+        int W = PairW, H = (int)(580 * Scale);
         SystemParametersInfoW(SPI_GETWORKAREA, 0, out var work, 0);
-        _pairHwnd = CreateWindowExW(0, PairClass, "Пушиши — привязать питомца", WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
+        _pairHwnd = CreateWindowExW(0, PairClass, "Пушиши", WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
             (work.Left + work.Right - W) / 2, (work.Top + work.Bottom - H) / 2, W, H, IntPtr.Zero, IntPtr.Zero, _instance, IntPtr.Zero);
-        int pad = (int)(18 * Scale), cw = W - pad * 2 - (int)(16 * Scale);
-        Child("STATIC", "Откройте сайт питомца, в меню выберите «Питомец на рабочем столе» и введите код, который там увидите:",
-            0, pad, pad, cw, (int)(60 * Scale), 0);
-        var edit = Child("EDIT", "", WS_TABSTOP | WS_BORDER | ES_CENTER | ES_NUMBER, pad, pad + (int)(70 * Scale), (int)(160 * Scale), (int)(32 * Scale), IdCode);
+        if (_titleFont == IntPtr.Zero) _titleFont = CreateFontW(-(int)(24 * Scale), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        if (_bigFont == IntPtr.Zero) _bigFont = CreateFontW(-(int)(16 * Scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        if (_codeFont == IntPtr.Zero) _codeFont = CreateFontW(-(int)(26 * Scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        _dark = SystemDark();
+        if (_white != IntPtr.Zero) DeleteObject(_white);
+        _white = CreateSolidBrush(_dark ? 0x202020u : 0xFFFFFFu); // the window's own background (BGR)
+        if (_dark) { var on = 1; DwmSetWindowAttribute(_pairHwnd, 20, ref on, 4); } // dark title bar
+        _faceSize = (int)(88 * Scale);
+        if (_faceBmp == IntPtr.Zero) _faceBmp = Sprites.Dib(Sprites.PetFace(_faceSize));
+        var icon = Sprites.Icon(Sprites.PetFace(64), 32);
+        SendMessageW(_pairHwnd, WM_SETICON, 1, icon); SendMessageW(_pairHwnd, WM_SETICON, 0, icon);
+
+        int pad = (int)(28 * Scale), cw = W - pad * 2 - (int)(16 * Scale), y = (int)(20 * Scale) + _faceSize + (int)(12 * Scale);
+        SendMessageW(Child("STATIC", "Привяжите питомца", SS_CENTER, pad, y, cw, (int)(34 * Scale), IdTitle), WM_SETFONT, _titleFont, 1);
+        y += (int)(40 * Scale);
+        Child("STATIC", "Он живёт на сайте pet.91i.ru. Привяжите его — и он придёт гулять по панели задач.", SS_CENTER, pad, y, cw, (int)(42 * Scale), IdSub);
+        y += (int)(56 * Scale);
+        var open = Child("BUTTON", "Открыть сайт и привязать", WS_TABSTOP | BS_DEFPUSHBUTTON, pad + (int)(30 * Scale), y, cw - (int)(60 * Scale), (int)(48 * Scale), IdOpen);
+        SendMessageW(open, WM_SETFONT, _bigFont, 1);
+        y += (int)(66 * Scale);
+        Child("STATIC", "или введите код с сайта:\nменю ☰ → «Питомец на рабочем столе»", SS_CENTER, pad, y, cw, (int)(42 * Scale), IdOr);
+        y += (int)(50 * Scale);
+        int ew = (int)(170 * Scale), bw = (int)(120 * Scale), gap = (int)(10 * Scale), x0 = pad + (cw - ew - bw - gap) / 2;
+        var edit = Child("EDIT", "", WS_TABSTOP | WS_BORDER | ES_CENTER | ES_NUMBER, x0, y, ew, (int)(44 * Scale), IdCode);
+        SendMessageW(edit, WM_SETFONT, _codeFont, 1);
         SendMessageW(edit, EM_LIMITTEXT, 6, IntPtr.Zero);
-        Child("BUTTON", "Привязать", WS_TABSTOP | BS_DEFPUSHBUTTON, pad + (int)(176 * Scale), pad + (int)(69 * Scale), (int)(140 * Scale), (int)(34 * Scale), IdButton);
-        Child("STATIC", "", 0, pad, pad + (int)(116 * Scale), cw, (int)(44 * Scale), IdStatus);
-        SetFocus(edit);
+        Child("BUTTON", "Привязать", WS_TABSTOP, x0 + ew + gap, y + (int)(4 * Scale), bw, (int)(36 * Scale), IdButton);
+        y += (int)(56 * Scale);
+        Child("STATIC", "", SS_CENTER, pad, y, cw, (int)(44 * Scale), IdStatus);
+        if (_dark)
+            foreach (var id in new[] { IdOpen, IdButton, IdCode })
+                SetWindowTheme(GetDlgItem(_pairHwnd, id), id == IdCode ? "DarkMode_CFD" : "DarkMode_Explorer", null);
+        SetFocus(open);
     }
 
     IntPtr Child(string cls, string text, uint style, int x, int y, int w, int h, int id)
@@ -304,37 +345,122 @@ sealed class App
         return c;
     }
 
+    void Status(string text) { if (_pairHwnd != IntPtr.Zero) SetWindowTextW(GetDlgItem(_pairHwnd, IdStatus), text); }
+
     unsafe IntPtr PairProc(IntPtr h, uint msg, IntPtr wp, IntPtr lp)
     {
         switch (msg)
         {
-            case WM_COMMAND when ((int)wp & 0xFFFF) is IdButton or 1:
-                var buf = stackalloc char[16];
-                var n = GetWindowTextW(GetDlgItem(h, IdCode), buf, 16);
-                var code = new string(buf, 0, n).Trim();
-                if (code.Length != 6) { SetWindowTextW(GetDlgItem(h, IdStatus), "Код — это 6 цифр."); return IntPtr.Zero; }
-                SetWindowTextW(GetDlgItem(h, IdStatus), "Проверяю…");
-                StartPair(code);
+            case WM_PAINT:
+                {
+                    var dc = BeginPaint(h, out var ps);
+                    var mem = CreateCompatibleDC(dc);
+                    var old = SelectObject(mem, _faceBmp);
+                    var inner = PairW - (int)(16 * Scale);
+                    AlphaBlend(dc, (inner - _faceSize) / 2, (int)(20 * Scale), _faceSize, _faceSize, mem, 0, 0, _faceSize, _faceSize,
+                        new BLENDFUNCTION { BlendOp = AC_SRC_OVER, SourceConstantAlpha = 255, AlphaFormat = AC_SRC_ALPHA });
+                    SelectObject(mem, old); DeleteDC(mem);
+                    EndPaint(h, ref ps);
+                    return IntPtr.Zero;
+                }
+            case WM_COMMAND when ((int)wp & 0xFFFF) == IdOpen:
+                OpenSiteToPair();
                 return IntPtr.Zero;
-            case WM_CTLCOLORSTATIC: return GetSysColorBrush(5);
-            case WM_CLOSE: DestroyWindow(h); _pairHwnd = IntPtr.Zero; return IntPtr.Zero;
+            case WM_COMMAND when ((int)wp & 0xFFFF) == IdButton:
+                {
+                    var buf = stackalloc char[16];
+                    var n = GetWindowTextW(GetDlgItem(h, IdCode), buf, 16);
+                    var code = new string(buf, 0, n).Trim();
+                    if (code.Length != 6) { Status("Код — это 6 цифр."); return IntPtr.Zero; }
+                    Status("Проверяю…");
+                    StartPair(code);
+                    return IntPtr.Zero;
+                }
+            case WM_COMMAND when ((int)wp & 0xFFFF) == 1: // Enter: the code if one is typed, else the big button
+                {
+                    var buf = stackalloc char[16];
+                    if (GetWindowTextW(GetDlgItem(h, IdCode), buf, 16) > 0) return PairProc(h, WM_COMMAND, IdButton, IntPtr.Zero);
+                    OpenSiteToPair();
+                    return IntPtr.Zero;
+                }
+            case WM_TIMER when (int)wp == TimerPoll:
+                Poll();
+                return IntPtr.Zero;
+            case WM_CTLCOLORSTATIC:
+                {
+                    var id = GetDlgCtrlID(lp);
+                    SetBkMode(wp, 1);
+                    SetTextColor(wp, _dark
+                        ? (id is IdSub or IdOr ? 0xA8A2A0u : id == IdStatus ? 0xD8A0F5u : 0xF2EEEBu)
+                        : (id is IdSub or IdOr ? 0x75808Fu : id == IdStatus ? 0x8A4DD8u : 0x3A2A26u)); // colours are BGR
+                    return _white;
+                }
+            case WM_CTLCOLOREDIT:
+                SetBkMode(wp, 2);
+                if (_dark) { SetTextColor(wp, 0xF2EEEB); SetBkColor(wp, 0x2B2B2B); return _editDark; }
+                break;
+            case WM_ERASEBKGND:
+                {
+                    var r = new RECT { Right = 10000, Bottom = 10000 };
+                    FillRect(wp, ref r, _white);
+                    return 1;
+                }
+            case WM_CLOSE: KillTimer(h, TimerPoll); DestroyWindow(h); _pairHwnd = IntPtr.Zero; _nonce = null; return IntPtr.Zero;
         }
         return DefWindowProcW(h, msg, wp, lp);
+    }
+
+    /// <summary>The site opens with a one-time link; the player presses «Привязать» there, and the app picks up its key.</summary>
+    void OpenSiteToPair()
+    {
+        Status("Открываю сайт…");
+        Task.Run(async () =>
+        {
+            _nonce = await Api.DeskStart();
+            PostMessageW(_pet.Hwnd, WM_PAIRED, 1, IntPtr.Zero);
+        });
+    }
+
+    void Poll()
+    {
+        if (_nonce is not { } nonce || DateTime.Now > _pollUntil)
+        {
+            KillTimer(_pairHwnd, TimerPoll);
+            if (_nonce != null) Status("Ссылка устарела — нажмите кнопку ещё раз.");
+            _nonce = null;
+            return;
+        }
+        Task.Run(async () =>
+        {
+            var r = await Api.DeskPoll(nonce);
+            if (r?.Token is { Length: > 0 } t) { _pairReply = new PairReply { Token = t }; PostMessageW(_pet.Hwnd, WM_PAIRED, IntPtr.Zero, IntPtr.Zero); }
+            else if (r?.Expired == true) { _nonce = null; _pairReply = new PairReply { Error = "Ссылка устарела — нажмите кнопку ещё раз." }; PostMessageW(_pet.Hwnd, WM_PAIRED, IntPtr.Zero, IntPtr.Zero); }
+        });
     }
 
     void StartPair(string code) =>
         Task.Run(async () => { _pairReply = await Api.Pair(code); PostMessageW(_pet.Hwnd, WM_PAIRED, IntPtr.Zero, IntPtr.Zero); });
 
-    void OnPaired()
+    void OnPaired(bool started)
     {
+        if (started)
+        {
+            if (_nonce == null) { Status("Нет связи с сайтом. Проверьте интернет."); return; }
+            ShellExecuteW(IntPtr.Zero, "open", Api.SiteUrl + "/#desk=" + _nonce, null, null, SW_SHOW);
+            Status("В браузере нажмите «Привязать» — питомец сразу придёт сюда.");
+            _pollUntil = DateTime.Now.AddMinutes(14);
+            SetTimer(_pairHwnd, TimerPoll, 2000, IntPtr.Zero);
+            return;
+        }
         var r = _pairReply;
         if (r?.Token is { Length: > 0 } token)
         {
+            _nonce = null;
             _settings.Token = token; _settings.SheetUrl = null; Api.SaveSettings(_settings);
-            if (_pairHwnd != IntPtr.Zero) { DestroyWindow(_pairHwnd); _pairHwnd = IntPtr.Zero; }
+            if (_pairHwnd != IntPtr.Zero) { KillTimer(_pairHwnd, TimerPoll); DestroyWindow(_pairHwnd); _pairHwnd = IntPtr.Zero; }
             Sync();
             return;
         }
-        if (_pairHwnd != IntPtr.Zero) SetWindowTextW(GetDlgItem(_pairHwnd, IdStatus), r?.Error ?? "Не получилось. Попробуйте ещё раз.");
+        Status(r?.Error ?? "Не получилось. Попробуйте ещё раз.");
     }
 }

@@ -235,6 +235,54 @@ sealed class Sprites : IDisposable
         return p;
     }
 
+    /// <summary>
+    /// The studio's little face (the same as the site's icon): ears, a round head with a dark-brown outline, a cream muzzle,
+    /// big eyes with highlights, blush and a pink nose. Drawn in code, antialiased by supersampling.
+    /// </summary>
+    public static Pixels PetFace(int size)
+    {
+        var p = new Pixels(size, size);
+        const int ss = 4;
+        // shapes in a 64×64 space, painted back to front: (inside test, colour ARGB)
+        static bool InEllipse(double x, double y, double cx, double cy, double rx, double ry) => (x - cx) * (x - cx) / (rx * rx) + (y - cy) * (y - cy) / (ry * ry) <= 1;
+        static bool InTri(double x, double y, double ax, double ay, double bx, double by, double cx, double cy)
+        {
+            double d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by), d2 = (x - cx) * (by - cy) - (bx - cx) * (y - cy), d3 = (x - ax) * (cy - ay) - (cx - ax) * (y - ay);
+            return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+        }
+        uint Pick(double x, double y)
+        {
+            const uint Outline = 0xFF6B4430, Fur = 0xFFF7C29C, Inner = 0xFFF4B7C8, Muzzle = 0xFFFDF0DA, Eye = 0xFF3B2A22, White = 0xFFFFFFFF, Blush = 0xCCF59FAE, Nose = 0xFFF07FA0;
+            uint c = 0;
+            // ears: outline triangle, then the inner pink
+            if (InTri(x, y, 12, 32, 13.5, 6.5, 31, 20) || InTri(x, y, 52, 32, 50.5, 6.5, 33, 20)) c = Outline;
+            if (InTri(x, y, 15, 29, 15.8, 10.5, 28, 20.5) || InTri(x, y, 49, 29, 48.2, 10.5, 36, 20.5)) c = Inner;
+            if (InEllipse(x, y, 32, 37, 23.3, 20.3)) c = Outline;
+            if (InEllipse(x, y, 32, 37, 20.7, 17.7)) c = Fur;
+            if (InEllipse(x, y, 32, 45, 10, 7)) c = Muzzle;
+            if (InEllipse(x, y, 16.5, 43, 3.6, 2.2) || InEllipse(x, y, 47.5, 43, 3.6, 2.2)) c = Blush;
+            if (InEllipse(x, y, 23, 36, 4.2, 5.2) || InEllipse(x, y, 41, 36, 4.2, 5.2)) c = Eye;
+            if (InEllipse(x, y, 24.3, 34, 1.7, 1.7) || InEllipse(x, y, 42.3, 34, 1.7, 1.7)) c = White;
+            if (InEllipse(x, y, 32, 42, 2.4, 1.6)) c = Nose;
+            return c;
+        }
+        for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
+            {
+                double a = 0, r = 0, g = 0, b = 0;
+                for (var sy = 0; sy < ss; sy++)
+                    for (var sx = 0; sx < ss; sx++)
+                    {
+                        var c = Pick((x + (sx + 0.5) / ss) * 64.0 / size, (y + (sy + 0.5) / ss) * 64.0 / size);
+                        double ca = (c >> 24) / 255.0;
+                        a += ca; r += ((c >> 16) & 255) * ca; g += ((c >> 8) & 255) * ca; b += (c & 255) * ca;
+                    }
+                const double n = ss * ss;
+                p.Data[y * size + x] = (uint)(a / n * 255) << 24 | (uint)(r / n) << 16 | (uint)(g / n) << 8 | (uint)(b / n);
+            }
+        return p;
+    }
+
     /// <summary>A tray icon from a picture (the pet's face, or the heart before there is a pet).</summary>
     public static IntPtr Icon(Pixels src, int size)
     {
