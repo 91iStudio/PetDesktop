@@ -32,4 +32,9 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The picture in the pairing window (a baby from the game, 176 px): only decoded while that window is open. -->
+    <EmbeddedResource Include="assets\welcome.png" LogicalName="welcome.png" />
+  </ItemGroup>
+
 </Project>

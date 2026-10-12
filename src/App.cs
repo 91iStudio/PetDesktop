@@ -299,7 +299,7 @@ sealed class App
     void OpenPair()
     {
         if (_pairHwnd != IntPtr.Zero) { SetForegroundWindow(_pairHwnd); return; }
-        int W = PairW, H = (int)(580 * Scale);
+        int W = PairW, H = (int)(624 * Scale);
         SystemParametersInfoW(SPI_GETWORKAREA, 0, out var work, 0);
         _pairHwnd = CreateWindowExW(0, PairClass, "Пушиши", WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
             (work.Left + work.Right - W) / 2, (work.Top + work.Bottom - H) / 2, W, H, IntPtr.Zero, IntPtr.Zero, _instance, IntPtr.Zero);
@@ -310,8 +310,8 @@ sealed class App
         if (_white != IntPtr.Zero) DeleteObject(_white);
         _white = CreateSolidBrush(_dark ? 0x202020u : 0xFFFFFFu); // the window's own background (BGR)
         if (_dark) { var on = 1; DwmSetWindowAttribute(_pairHwnd, 20, ref on, 4); } // dark title bar
-        _faceSize = (int)(88 * Scale);
-        if (_faceBmp == IntPtr.Zero) _faceBmp = Sprites.Dib(Sprites.PetFace(_faceSize));
+        _faceSize = (int)(132 * Scale);
+        if (_faceBmp == IntPtr.Zero) _faceBmp = Sprites.Dib(WelcomePicture(_faceSize));
         var icon = Sprites.Icon(Sprites.PetFace(64), 32);
         SendMessageW(_pairHwnd, WM_SETICON, 1, icon); SendMessageW(_pairHwnd, WM_SETICON, 0, icon);
 
@@ -343,6 +343,24 @@ sealed class App
         var c = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, _pairHwnd, id, _instance, IntPtr.Zero);
         SendMessageW(c, WM_SETFONT, _font, 1);
         return c;
+    }
+
+    /// <summary>A baby from the game (the picture inside the exe); the drawn little face if it cannot be read.</summary>
+    static Pixels WelcomePicture(int size)
+    {
+        try
+        {
+            using var res = typeof(App).Assembly.GetManifestResourceStream("welcome.png");
+            if (res != null)
+            {
+                Directory.CreateDirectory(Api.Folder);
+                var file = Path.Combine(Api.Folder, "welcome.png");
+                using (var f = File.Create(file)) res.CopyTo(f);
+                if (Sprites.LoadPng(file) is { } png) return Sprites.Scale(png, size, size);
+            }
+        }
+        catch { }
+        return Sprites.PetFace(size);
     }
 
     void Status(string text) { if (_pairHwnd != IntPtr.Zero) SetWindowTextW(GetDlgItem(_pairHwnd, IdStatus), text); }
@@ -405,7 +423,7 @@ sealed class App
                     FillRect(wp, ref r, _white);
                     return 1;
                 }
-            case WM_CLOSE: KillTimer(h, TimerPoll); DestroyWindow(h); _pairHwnd = IntPtr.Zero; _nonce = null; return IntPtr.Zero;
+            case WM_CLOSE: KillTimer(h, TimerPoll); DestroyWindow(h); _pairHwnd = IntPtr.Zero; _nonce = null; FreePicture(); return IntPtr.Zero;
         }
         return DefWindowProcW(h, msg, wp, lp);
     }
@@ -438,6 +456,8 @@ sealed class App
         });
     }
 
+    void FreePicture() { if (_faceBmp != IntPtr.Zero) { DeleteObject(_faceBmp); _faceBmp = IntPtr.Zero; } }
+
     void StartPair(string code) =>
         Task.Run(async () => { _pairReply = await Api.Pair(code); PostMessageW(_pet.Hwnd, WM_PAIRED, IntPtr.Zero, IntPtr.Zero); });
 
@@ -457,7 +477,7 @@ sealed class App
         {
             _nonce = null;
             _settings.Token = token; _settings.SheetUrl = null; Api.SaveSettings(_settings);
-            if (_pairHwnd != IntPtr.Zero) { KillTimer(_pairHwnd, TimerPoll); DestroyWindow(_pairHwnd); _pairHwnd = IntPtr.Zero; }
+            if (_pairHwnd != IntPtr.Zero) { KillTimer(_pairHwnd, TimerPoll); DestroyWindow(_pairHwnd); _pairHwnd = IntPtr.Zero; FreePicture(); }
             Sync();
             return;
         }

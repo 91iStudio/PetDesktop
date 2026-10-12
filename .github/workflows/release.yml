@@ -24,21 +24,31 @@ jobs:
       - name: Build
         run: dotnet publish PetDesktop.csproj -c Release -o out -p:ContinuousIntegrationBuild=true -p:Deterministic=true
 
+      # A native build too (NativeAOT: no .NET inside, smaller and lighter); needs the C++ tools this runner has.
+      - name: Build (native)
+        shell: pwsh
+        run: |
+          dotnet publish PetDesktop.csproj -c Release -o out-native -p:Aot=true -p:ContinuousIntegrationBuild=true -p:Deterministic=true
+          Copy-Item out-native/Pushishi.exe out/Pushishi-native.exe
+
       - name: SHA-256
         shell: pwsh
         run: |
-          $h = (Get-FileHash out/Pushishi.exe -Algorithm SHA256).Hash.ToLower()
-          "$h  Pushishi.exe" | Out-File -Encoding ascii out/SHA256SUMS.txt
-          "SHA-256: $h" >> $env:GITHUB_STEP_SUMMARY
+          $lines = foreach ($f in 'Pushishi.exe', 'Pushishi-native.exe') { "$((Get-FileHash out/$f -Algorithm SHA256).Hash.ToLower())  $f" }
+          $lines | Out-File -Encoding ascii out/SHA256SUMS.txt
+          $lines | ForEach-Object { "SHA-256: $_" } >> $env:GITHUB_STEP_SUMMARY
 
       - name: Attest
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: out/Pushishi.exe
+          subject-path: |
+            out/Pushishi.exe
+            out/Pushishi-native.exe
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             out/Pushishi.exe
+            out/Pushishi-native.exe
             out/SHA256SUMS.txt
